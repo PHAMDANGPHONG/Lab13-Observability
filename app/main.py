@@ -3,8 +3,12 @@ from __future__ import annotations
 import os
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 from structlog.contextvars import bind_contextvars
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from .agent import LabAgent
 from .incidents import disable, enable, status
@@ -19,6 +23,12 @@ configure_logging()
 log = get_logger()
 app = FastAPI(title="Day 13 Observability Lab")
 app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 agent = LabAgent()
 
 
@@ -37,15 +47,44 @@ async def health() -> dict:
     return {"ok": True, "tracing_enabled": tracing_enabled(), "incidents": status()}
 
 
+@app.get("/logs")
+async def get_logs() -> list[dict]:
+    log_file = os.getenv("LOG_PATH", "data/logs.jsonl")
+    if not os.path.exists(log_file):
+        return []
+    with open(log_file, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+        # Return last 10 logs, parsed as JSON
+        recent = []
+        for line in lines[-15:]:
+            try:
+                recent.append(json.loads(line))
+            except:
+                continue
+        return recent[::-1] # Newest first
+
+
 @app.get("/metrics")
 async def metrics() -> dict:
     return snapshot()
 
 
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard() -> str:
+    dashboard_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
+    with open(dashboard_path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: Request, body: ChatRequest) -> ChatResponse:
-    # TODO: Enrich logs with request context (user_id_hash, session_id, feature, model, env)
-    # bind_contextvars(...)
+    bind_contextvars(
+        user_id_hash=hash_user_id(body.user_id),
+        session_id=body.session_id,
+        feature=body.feature,
+        model=agent.model,
+        env=os.getenv("APP_ENV", "dev"),
+    )
     
     log.info(
         "request_received",
@@ -58,6 +97,7 @@ async def chat(request: Request, body: ChatRequest) -> ChatResponse:
             feature=body.feature,
             session_id=body.session_id,
             message=body.message,
+            correlation_id=request.state.correlation_id,
         )
         log.info(
             "response_sent",

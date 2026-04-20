@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent - 6-Panel Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --accent-primary: #818cf8;
+            --accent-secondary: #c084fc;
+            --accent-success: #4ade80;
+            --accent-error: #f87171;
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            margin: 0; padding: 0; box-sizing: border-box;
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: radial-gradient(at 0% 0%, rgba(129,140,248,0.1) 0px, transparent 50%);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; }
+
+        header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .logo h1 {
+            font-size: 1.5rem; font-weight: 800;
+            background: linear-gradient(to right, var(--accent-primary), var(--accent-secondary));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            display: flex; flex-direction: column;
+        }
+
+        .card-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 1rem; color: var(--text-dim);
+            font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+        }
+
+        .card-header i { color: var(--accent-primary); width: 16px; height: 16px; }
+
+        .big-number { font-size: 2.25rem; font-weight: 800; margin-bottom: 0.25rem; }
+        
+        .stat-sub { font-size: 0.875rem; color: var(--text-dim); display: flex; align-items: center; gap: 4px; }
+
+        .chart-container { height: 160px; position: relative; margin-top: auto; }
+
+        .span-2 { grid-column: span 2; }
+
+        @media (max-width: 1024px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="container" id="dashboard">
+        <header>
+            <div class="logo">
+                <h1>ADK 6-PANEL MONITOR</h1>
+            </div>
+            <div id="last-update" style="color: var(--text-dim); font-size: 0.8rem;">Connecting...</div>
+        </header>
+
+        <div class="grid">
+            <!-- 1. Traffic -->
+            <div class="card">
+                <div class="card-header">
+                    <span>Traffic</span>
+                    <i data-lucide="activity"></i>
+                </div>
+                <div class="big-number" id="traffic-val">0</div>
+                <div class="stat-sub">
+                    <i data-lucide="arrow-right" style="width:14px"></i>
+                    <span>Total requests processed</span>
+                </div>
+            </div>
+
+            <!-- 2. Cost -->
+            <div class="card">
+                <div class="card-header">
+                    <span>Cost (USD)</span>
+                    <i data-lucide="dollar-sign"></i>
+                </div>
+                <div class="big-number" id="cost-val">$0.00</div>
+                <div class="stat-sub">
+                    <i data-lucide="zap" style="width:14px"></i>
+                    <span id="avg-cost">Avg: $0.000</span>
+                </div>
+            </div>
+
+            <!-- 3. Quality -->
+            <div class="card">
+                <div class="card-header">
+                    <span>Quality</span>
+                    <i data-lucide="award"></i>
+                </div>
+                <div class="big-number" id="quality-val">0%</div>
+                <div class="stat-sub">
+                    <i data-lucide="shield-check" style="width:14px"></i>
+                    <span>Heuristic Proxy</span>
+                </div>
+            </div>
+
+            <!-- 4. Latency Trend -->
+            <div class="card span-2">
+                <div class="card-header">
+                    <span>Latency Distribution (P50/P95/P99)</span>
+                    <i data-lucide="clock"></i>
+                </div>
+                <div class="chart-container">
+                    <canvas id="latencyChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 5. Error Rate Trend -->
+            <div class="card">
+                <div class="card-header">
+                    <span>Error Rate %</span>
+                    <i data-lucide="alert-circle"></i>
+                </div>
+                <div class="chart-container">
+                    <canvas id="errorChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 6. Tokens -->
+            <div class="card span-3">
+                <div class="card-header">
+                    <span>Token Consumption (Input vs Output)</span>
+                    <i data-lucide="database"></i>
+                </div>
+                <div class="chart-container" style="height: 120px;">
+                    <canvas id="tokenChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+        let latencyChart, errorChart, tokenChart;
+
+        async function updateData() {
+            try {
+                const response = await fetch('/metrics');
+                const data = await response.json();
+                
+                // Update Big Numbers
+                document.getElementById('traffic-val').innerText = data.traffic;
+                document.getElementById('cost-val').innerText = `$${data.total_cost_usd.toFixed(2)}`;
+                document.getElementById('avg-cost').innerText = `Avg: $${data.avg_cost_usd.toFixed(4)}`;
+                document.getElementById('quality-val').innerText = `${(data.quality_avg * 100).toFixed(1)}%`;
+                document.getElementById('last-update').innerText = `Live • ${new Date().toLocaleTimeString()}`;
+
+                renderCharts(data);
+            } catch (e) { console.error(e); }
+        }
+
+        function renderCharts(data) {
+            const history = data.history || [];
+            const labels = history.map((_, i) => i);
+
+            // 4. Latency Line Chart
+            const latencyCtx = document.getElementById('latencyChart').getContext('2d');
+            const latencyData = {
+                labels: labels,
+                datasets: [
+                    { label: 'P95', data: history.map(h => h.latency), borderColor: '#f87171', fill: false, tension: 0.3, pointRadius:0 },
+                ]
+            };
+            if (latencyChart) { latencyChart.data = latencyData; latencyChart.update(); }
+            else { 
+                latencyChart = new Chart(latencyCtx, {
+                    type: 'line', data: latencyData, 
+                    options: { 
+                        responsive: true, maintainAspectRatio: false, 
+                        plugins: { legend: { display: false } },
+                        scales: { x: { display: false }, y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } } }
+                    }
+                });
+            }
+
+            // 5. Error Line Chart
+            const errorCtx = document.getElementById('errorChart').getContext('2d');
+            const errorPoints = history.map(h => h.traffic > 0 ? (h.errors / h.traffic * 100) : 0);
+            const errorData = {
+                labels: labels,
+                datasets: [{ data: errorPoints, borderColor: '#f87171', backgroundColor: 'rgba(248,113,113,0.1)', fill: true, tension: 0.4, pointRadius:0 }]
+            };
+            if (errorChart) { errorChart.data = errorData; errorChart.update(); }
+            else { 
+                errorChart = new Chart(errorCtx, {
+                    type: 'line', data: errorData, 
+                    options: { 
+                        responsive: true, maintainAspectRatio: false, 
+                        plugins: { legend: { display: false } },
+                        scales: { x: { display: false }, y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } } }
+                    }
+                });
+            }
+
+            // 6. Token Bar Chart
+            const tokenCtx = document.getElementById('tokenChart').getContext('2d');
+            const tokenData = {
+                labels: ['Tokens'],
+                datasets: [
+                    { label: 'In', data: [data.tokens_in_total], backgroundColor: '#818cf8', borderRadius: 5 },
+                    { label: 'Out', data: [data.tokens_out_total], backgroundColor: '#c084fc', borderRadius: 5 }
+                ]
+            };
+            if (tokenChart) { tokenChart.data = tokenData; tokenChart.update(); }
+            else { 
+                tokenChart = new Chart(tokenCtx, {
+                    type: 'bar', data: tokenData, 
+                    options: { 
+                        indexAxis: 'y', responsive: true, maintainAspectRatio: false, 
+                        plugins: { legend: { display: false } },
+                        scales: { x: { grid: { color: 'rgba(255,255,255,0.05)' } }, y: { display: false } }
+                    }
+                });
+            }
+        }
+
+        setInterval(updateData, 15000);
+        updateData();
+    </script>
+</body>
+</html>

@@ -26,7 +26,7 @@ class LabAgent:
         self.llm = FakeLLM(model=model)
 
     @observe()
-    def run(self, user_id: str, feature: str, session_id: str, message: str) -> AgentResult:
+    def run(self, user_id: str, feature: str, session_id: str, message: str, correlation_id: str | None = None) -> AgentResult:
         started = time.perf_counter()
         docs = retrieve(message)
         prompt = f"Feature={feature}\nDocs={docs}\nQuestion={message}"
@@ -39,6 +39,7 @@ class LabAgent:
             user_id=hash_user_id(user_id),
             session_id=session_id,
             tags=["lab", feature, self.model],
+            id=correlation_id,
         )
         langfuse_context.update_current_observation(
             metadata={"doc_count": len(docs), "query_preview": summarize_text(message)},
